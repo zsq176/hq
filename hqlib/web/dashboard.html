@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="hq-csrf" content="@@TOKEN@@">
+<title>hq · 邮件与日报</title>
+<style nonce="@@TOKEN@@">
+:root { --line:#d9d9d9; --bg:#fafafa; --head:#f0f0f0; --ink:#1a1a1a; --dim:#666;
+        --ok:#1a7f37; --bad:#c62828; --warn:#b26a00; --info:#155fa0; }
+* { box-sizing:border-box; }
+body { margin:0; font:13px/1.45 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+       color:var(--ink); background:#fff; }
+header { background:var(--head); border-bottom:1px solid var(--line); padding:6px 12px; }
+.hrow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.hrow b { font-size:15px; }
+.spacer { flex:1; }
+button { font:inherit; padding:3px 12px; border:1px solid #bbb; background:#fff;
+         border-radius:3px; cursor:pointer; }
+button:hover { background:#f2f2f2; }
+button:disabled { color:#999; cursor:default; background:#f5f5f5; }
+button.danger { border-color:#c62828; color:#c62828; }
+.tog { cursor:pointer; user-select:none; }
+.tog.on { color:var(--ok); font-weight:600; }
+.tog.off { color:var(--dim); }
+#banner { display:none; padding:4px 12px; background:#fff3e0; border-bottom:1px solid #f0c090;
+          color:var(--warn); }
+#summary { display:flex; gap:18px; padding:6px 12px; border-bottom:1px solid var(--line);
+           background:var(--bg); flex-wrap:wrap; }
+#summary .lbl { color:var(--dim); }
+main { display:flex; min-height:0; height:calc(100vh - 118px); }
+#main { flex:2; min-width:0; display:flex; flex-direction:column; border-right:1px solid var(--line); }
+#side { flex:1; min-width:300px; max-width:420px; overflow-y:auto; background:var(--bg); }
+.filters { display:flex; gap:10px; align-items:center; padding:6px 12px;
+           border-bottom:1px solid var(--line); flex-wrap:wrap; }
+.filters select, .filters input { font:inherit; padding:2px 4px; }
+#tablewrap { overflow:auto; flex:1; }
+table { border-collapse:collapse; width:100%; }
+th, td { text-align:left; padding:5px 8px; border-bottom:1px solid #eee; white-space:nowrap; }
+th { position:sticky; top:0; background:var(--head); font-weight:600; z-index:1; }
+td.summary { white-space:nowrap; max-width:340px; overflow:hidden; text-overflow:ellipsis; }
+tr.row:hover { background:#f4f8ff; cursor:pointer; }
+tr.detail td { background:#fcfcfc; white-space:normal; }
+tr.detail td .fullsum { white-space:pre-wrap; word-break:break-word; }
+.badge { padding:0 6px; border-radius:3px; display:inline-block; }
+.b-ok { color:var(--ok); } .b-bad { color:var(--bad); } .b-warn { color:var(--warn); }
+.b-info { color:var(--info); } .b-dim { color:var(--dim); }
+.pager { display:flex; gap:10px; align-items:center; padding:5px 12px;
+         border-top:1px solid var(--line); background:var(--bg); }
+.panel { padding:10px 12px; border-bottom:1px solid var(--line); }
+.panel h3 { margin:0 0 6px; font-size:13px; }
+.kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; }
+.kv .k { color:var(--dim); }
+.err { color:var(--bad); }
+.oktxt { color:var(--ok); }
+.warntxt { color:var(--warn); }
+.dimtxt { color:var(--dim); }
+.daily { border:1px solid var(--line); background:#fff; margin:6px 0; padding:6px 8px; cursor:pointer; }
+.daily:hover { background:#f4f8ff; }
+.daily.alert { border-color:#f0c090; background:#fff8ef; }
+.daily .sub { font-weight:600; }
+pre.body { white-space:pre-wrap; word-break:break-word; font:12px/1.5 Consolas,"Microsoft YaHei",monospace;
+           background:#fff; border:1px solid var(--line); padding:8px; margin:6px 0; max-height:300px; overflow:auto; }
+#config { flex:2; min-width:0; overflow-y:auto; border-right:1px solid var(--line); }
+#config.hidden { display:none; }
+/* 配置面板替换主记录区（F8）：展开时主表隐藏而非三栏并列；日报/接入侧区保留 */
+main.config-open #main { display:none; }
+.frm { padding:10px 12px; }
+.frm label { display:block; margin:8px 0 2px; }
+.frm input[type=text], .frm input[type=number], .frm select {
+  font:inherit; padding:3px 6px; width:100%; max-width:420px; }
+.frm .row2 { display:flex; gap:12px; }
+.frm .row2 > div { flex:1; }
+.proj { display:flex; gap:6px; align-items:center; margin:4px 0; }
+.proj input { flex:1; max-width:520px; }
+.proj .exists { min-width:70px; }
+.notice { color:var(--dim); margin-top:6px; }
+#testresult { margin-top:6px; }
+.hidden { display:none !important; }
+@media (max-width: 900px) {
+  main { flex-direction:column; height:auto; }
+  #main, #side, #config { border-right:none; max-width:none; }
+  #tablewrap { max-height:60vh; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="hrow">
+    <b>HQ 邮件与日报</b>
+    <span>自动邮件：<span id="mailtog" class="tog">—</span></span>
+    <span id="winlabel" class="dimtxt">—</span>
+    <span class="spacer"></span>
+    <span id="refreshed" class="dimtxt"></span>
+    <button id="btnrefresh">刷新</button>
+    <button id="btnconfig">配置</button>
+  </div>
+</header>
+<div id="banner"></div>
+<div id="summary">
+  <span><span class="lbl">近24h：</span>完成轮次 <b id="c24done">—</b>
+        ｜SMTP已接受 <b id="c24smtp">—</b></span>
+  <span><span class="lbl">全部：</span>待确认 <b id="cpending">—</b>
+        ｜需要核对 <b id="cattention">—</b><span class="dimtxt" id="cattentiondetail"></span></span>
+  <span><span class="lbl">登记项目：</span><b id="cprojects">—</b></span>
+  <span class="dimtxt" id="smtptestline"></span>
+</div>
+<main>
+  <section id="main">
+    <div class="filters">
+      项目 <select id="fproject"><option value="">全部</option></select>
+      时间 <select id="fperiod">
+        <option value="24h" selected>最近24h</option>
+        <option value="7d">最近7天</option>
+        <option value="all">全部</option>
+      </select>
+      <label><input type="checkbox" id="fattention"> 只看需注意</label>
+      <span class="spacer"></span>
+      <span id="rowcount" class="dimtxt"></span>
+    </div>
+    <div id="tablewrap">
+      <table>
+        <thead><tr>
+          <th>时间（北京）</th><th>项目</th><th>执行结果</th>
+          <th>邮件状态</th><th>摘要</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="empty" class="panel hidden"></div>
+    </div>
+    <div class="pager">
+      <button id="pprev">上一页</button>
+      <button id="pnext">下一页</button>
+      <span id="pageinfo" class="dimtxt"></span>
+    </div>
+  </section>
+  <section id="config" class="hidden"></section>
+  <aside id="side">
+    <div class="panel" id="dailypanel">
+      <h3>日报 <span class="dimtxt" id="nextdaily"></span></h3>
+      <div id="dailies"></div>
+      <div class="pager">
+        <button id="dprev">上一页</button>
+        <button id="dnext">下一页</button>
+        <span id="dpageinfo" class="dimtxt"></span>
+      </div>
+    </div>
+    <div class="panel" id="setuppanel">
+      <h3>接入 <button id="btnchecksetup" style="float:right">检查接入</button></h3>
+      <div id="setup"></div>
+    </div>
+  </aside>
+</main>
+<script nonce="@@TOKEN@@">
+"use strict";
+const $ = id => document.getElementById(id);
+const CSRF = document.querySelector('meta[name="hq-csrf"]').content;
+const state = { offset: 0, limit: 50, snap: null, cfg: null,
+                lastRefresh: null, stale: false, projects: [],
+                dailyOffset: 0, dailyLimit: 10, expanded: new Set(),
+                // 边界方案（2026-10-08 B2）：版本由视图操作拥有——快照与配置
+                // 面板各持一个单调版本，成功/失败/关闭用同一有效性判断；详情
+                // 用节点归属、目录查询用行内版本，不共用全局取消权。
+                v: { snapshot: 0, config: 0 } };
+
+// 展示时间统一北京时间（口径明确）：输入是 UTC/带时区 ISO 串，缺省按 UTC
+// 解释，先化成同一时刻再加 8 小时取北京墙钟（复审 F4 反例 15:36→23:36）。
+// 无法解析的串原样展示，不猜。
+function fmtWhen(iso) {
+  if (!iso) return "—";
+  const s = String(iso).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/.exec(s);
+  if (!m) return s;
+  const [, Y, Mo, D, H, Mi, S, off] = m;
+  const ms = Date.UTC(+Y, +Mo - 1, +D, +H, +Mi, +(S || 0));
+  let offMs = 0;
+  if (off && off !== "Z") {
+    const sign = off[0] === "-" ? -1 : 1;
+    offMs = sign * ((+off.slice(1, 3)) * 60 + (+off.slice(-2))) * 60000;
+  }
+  const bj = new Date(ms - offMs + 8 * 3600000);
+  const p = n => String(n).padStart(2, "0");
+  return bj.getUTCFullYear() + "-" + p(bj.getUTCMonth() + 1) + "-" + p(bj.getUTCDate()) +
+    " " + p(bj.getUTCHours()) + ":" + p(bj.getUTCMinutes());
+}
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function badgeClass(label) {
+  if (label === "SMTP已接受") return "b-ok";
+  if (label === "发送失败" || label === "待核对") return "b-bad";
+  if (label === "结果待核对" || label === "发送中或结果待核对") return "b-warn";
+  if (label === "仅日报" || label === "已跳过（只进日报）") return "b-dim";
+  return "b-info";
+}
+function rowKey(r) { return r.session + ":" + r.turn; }
+
+// api 只负责 fetch / JSON 解析 / 状态码（边界方案 B2）：请求版本由各视图
+// 操作在 await 前自取，成功与失败回调共用同一有效性判断；不依赖只存在于
+// 成功返回里的 __seq 来判定失败是否过期。
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  let j;
+  try { j = await r.json(); }
+  catch (e) { throw new Error("HTTP " + r.status + "（非 JSON 响应）"); }
+  j.__status = r.status;
+  return j;
+}
+
+function banner(text, show) {
+  $("banner").textContent = text;
+  $("banner").style.display = show ? "block" : "none";
+}
+
+async function refresh() {
+  const p = new URLSearchParams();
+  if (state.projectFilter) p.set("project", state.projectFilter);
+  p.set("period", $("fperiod").value);
+  p.set("attention", $("fattention").checked ? "1" : "0");
+  p.set("offset", state.offset);
+  p.set("limit", state.limit);
+  p.set("daily_offset", state.dailyOffset);
+  p.set("daily_limit", state.dailyLimit);
+  const my = ++state.v.snapshot;            // 本次请求的版本，成功失败共用
+  try {
+    const j = await api("/api/snapshot?" + p.toString());
+    if (my !== state.v.snapshot) return;    // 已被更新请求淘汰：成功也丢弃
+    // 数据未变就跳过重渲染：10s 轮询不该卷走用户展开的详情行/滚动位置，
+    // 也避免重渲染与点击竞态。setup/接入查询完成、配置状态、测试邮件状态
+    // 变化都会改变签名（复审 F4：仅 setup 变化也必须渲染）。
+    const sig = JSON.stringify([j.counts, j.rows, j.total, j.recent_dailies,
+                                j.source, j.window, j.next_daily,
+                                j.projects_list, j.project_options, j.config,
+                                j.test, j.setup, j.setup_queried_at]);
+    if (j.__status === 503) {
+      state.lastRefresh = new Date();
+      banner("记录数据读取失败（业务库暂不可读：" +
+        (j.error && j.error.detail ? j.error.detail : "HTTP 503") +
+        "）。服务本身在运行；自动邮件由系统计划任务负责，不受本页影响。", true);
+      return;
+    }
+    state.stale = false;
+    banner("", false);
+    if (j.source && j.source.state === "error") {
+      banner("记录数据源异常（原因见表格区）。服务在运行，刷新不触发 tick。", true);
+    }
+    state.lastRefresh = new Date();
+    $("refreshed").textContent = "已刷新 " + state.lastRefresh.toTimeString().slice(0, 8);
+    if (sig === state.lastSig) return;
+    state.lastSig = sig;
+    state.snap = j;
+    render(j);
+  } catch (e) {
+    if (my !== state.v.snapshot) return;    // 旧请求的失败完全丢弃（B2）
+    state.stale = true;
+    const t = state.lastRefresh ? state.lastRefresh.toTimeString().slice(0, 8) : "—";
+    // 网络层失败（服务没响应）与组件数据错误（source/503，见上）分开说明
+    banner("服务无响应（最近刷新 " + t +
+      "）。自动邮件由系统计划任务负责，不受本页影响。", true);
+  }
+}
+
+function render(j) {
+  if (j.config && j.config.source === "ok") {
+    const tog = $("mailtog");
+    tog.textContent = j.config.enabled ? "启用（点暂停）" : "暂停（点启用）";
+    tog.className = "tog " + (j.config.enabled ? "on" : "off");
+  } else if (j.config && j.config.source === "schema_error") {
+    // 复审 R1：类型损坏是未知状态，不得显示成确定的"暂停/启用"
+    $("mailtog").textContent = "配置错误（未知）";
+    $("mailtog").className = "tog off";
+  } else {
+    $("mailtog").textContent = "配置不可读";
+    $("mailtog").className = "tog off";
+  }
+  $("winlabel").textContent = j.window.label + " · 下次日报 " + j.next_daily.beijing;
+  $("c24done").textContent = j.counts.completed_24h ?? "—";
+  $("c24smtp").textContent = j.counts.smtp_accepted_24h ?? "—";
+  $("cpending").textContent = j.counts.pending_confirm ?? "—";
+  $("cattention").textContent = j.counts.attention ?? "—";
+  $("cattentiondetail").textContent =
+    j.counts.attention_rounds != null
+      ? "（轮次 " + j.counts.attention_rounds + "｜日报 " + j.counts.attention_daily + "）"
+      : "";
+  $("cprojects").textContent = j.counts.projects ?? "—";
+  if (j.test) {
+    $("smtptestline").textContent = "测试邮件：" +
+      ({accepted: "已接受", rejected: "被拒绝", unknown: "结果待核对",
+        running: "发送中", not_tested: "本次尚未测试"}[j.test.status] || j.test.status);
+  }
+  // 项目下拉：全部=显式空值；候选项=后端给的登记∪全历史记录项目根目录
+  // （不是只来自当前页；复审 F3）。
+  const sel = $("fproject");
+  const cur = sel.value;
+  sel.textContent = "";
+  const allopt = el("option", "", "全部"); allopt.value = ""; sel.appendChild(allopt);
+  const opts = j.project_options || (j.projects_list || []).map(p => ({
+    path: p.normalized, name: p.name }));
+  const seen = new Set();
+  for (const p of opts) {
+    if (!p || !p.path || seen.has(p.path)) continue;
+    seen.add(p.path);
+    const o = el("option", "", p.name); o.value = p.path; sel.appendChild(o);
+  }
+  for (const r of (j.rows || [])) {
+    if (!seen.has(r.project)) {
+      seen.add(r.project);
+      const o = el("option", "", r.project_name); o.value = r.project;
+      sel.appendChild(o);
+    }
+  }
+  sel.value = cur;
+  if (sel.selectedIndex === -1) sel.value = "";
+
+  // 表格：重建时保持展开详情与滚动位置（复审 F4：真实数据变化也成立）
+  const wrap = $("tablewrap");
+  const keepScroll = wrap.scrollTop;
+  const tb = $("rows");
+  tb.textContent = "";
+  $("empty").classList.add("hidden");
+  if (j.source.state !== "ok") {
+    const d = el("div", "panel");
+    d.appendChild(el("div", "err", j.source.state === "missing"
+      ? "尚无执行记录（数据库不存在：" + j.source.detail + "）。"
+      : "数据源异常：" + (j.source.detail || j.source.state)));
+    d.appendChild(el("div", "notice",
+      "开始记录需要：1) hq.toml 登记项目；2) mail setup 安装观察 hook（新会话生效）；" +
+      "3) install-mail-task.ps1 安装每分钟计划任务。安装成功≠已触发。"));
+    $("empty").replaceChildren(d);
+    $("empty").classList.remove("hidden");
+  } else if (!j.rows.length) {
+    $("empty").replaceChildren(el("div", "panel",
+      "当前筛选条件下没有记录。（需注意项自动查看全部历史；旧待核对项请切到“全部”时间范围）"));
+    $("empty").classList.remove("hidden");
+  }
+  for (const r of j.rows) {
+    const tr = el("tr", "row");
+    tr.appendChild(el("td", "", r.when_beijing ?? "—"));
+    tr.appendChild(el("td", "", r.project_name));
+    tr.appendChild(el("td", "", r.outcome === "completed" ? "完成"
+                        : (r.outcome === "pending" ? "待确认" : r.outcome)));
+    const st = el("td", badgeClass(r.label), r.label);
+    tr.appendChild(st);
+    tr.appendChild(el("td", "summary", r.summary || ""));
+    tr.addEventListener("click", () => toggleDetail(tr, r));
+    tb.appendChild(tr);
+    if (state.expanded.has(rowKey(r))) {
+      tr.after(buildDetailRow(r));       // 展开状态跨轮询保持
+    }
+  }
+  wrap.scrollTop = keepScroll;
+  $("rowcount").textContent = "共 " + j.total + " 条（当前页 " + j.rows.length + "）";
+  $("pageinfo").textContent = "第 " + (state.offset + 1) + "–" +
+    (state.offset + j.rows.length) + " / " + j.total + " 条";
+  $("pprev").disabled = state.offset <= 0;
+  $("pnext").disabled = state.offset + state.limit >= j.total;
+
+  // 日报（侧栏，有界分页；异常日报高亮并计入需要核对的日报分项）
+  $("nextdaily").textContent = "下次 " + j.next_daily.beijing + "（计划时间）";
+  const dl = $("dailies");
+  dl.textContent = "";
+  if (!j.recent_dailies.length) {
+    dl.appendChild(el("div", "dimtxt", "没有日报记录（每天 19:00 由计划任务生成）。"));
+  }
+  const alertStates = ["failed", "uncertain", "sending"];
+  for (const d of j.recent_dailies) {
+    const box = el("div", "daily" + (alertStates.includes(d.state) ? " alert" : ""));
+    box.appendChild(el("div", "sub", d.coverage || d.key));
+    box.appendChild(el("div", "dimtxt",
+      d.state + (d.sent ? " · 已发送 " + fmtWhen(d.sent) : "") + (d.error ? " · " + d.error : "")));
+    box.addEventListener("click", () => showDelivery(box, d.key));
+    dl.appendChild(box);
+  }
+  // 日报侧区分页：需注意口径下用过滤后的总数（复审 R2），否则用全库总数
+  const attentionOn = !!(j.query && j.query.attention);
+  const dtot = (attentionOn ? j.counts.daily_total_filtered
+                : j.counts.daily_total) ?? "—";
+  const dtotEnd = attentionOn ? (j.counts.daily_total_filtered || 0)
+      : (j.counts.daily_total || 0);
+  $("dpageinfo").textContent = (attentionOn ? "需注意 " : "")
+    + (j.recent_dailies.length
+    ? "第 " + (state.dailyOffset + 1) + "–" + (state.dailyOffset + j.recent_dailies.length)
+      + " / " + dtot + " 期" : "共 " + dtot + " 期");
+  $("dprev").disabled = state.dailyOffset <= 0;
+  $("dnext").disabled = state.dailyOffset + j.recent_dailies.length >= dtotEnd;
+  renderSetup(j.setup, j.setup_queried_at);
+}
+
+function renderSetup(s, at) {
+  const box = $("setup");
+  box.textContent = "";
+  const kv = (k, v, cls) => {
+    box.appendChild(el("div", "k", k));
+    box.appendChild(el("div", cls || "", v));
+  };
+  if (at) box.appendChild(el("div", "dimtxt", "查询时间：" + fmtWhen(at)));
+  if (!s) { kv("接入", "尚未检查（点“检查接入”）"); return; }
+  if (s.source === "error") { kv("接入", "查询失败：" + s.detail, "err"); return; }
+  const h = s.hook || {};
+  if (h.source === "error") {
+    // 复审 R4：hook 组件查询失败展示未知及原因，不推测"未安装"
+    kv("观察 hook 条目", "未知（查询失败：" + (h.detail || "") + "）", "err");
+    kv("hooks.enabled", "未知（组件查询失败）", "warntxt");
+    kv("说明", h.note || "", "dimtxt");
+  } else {
+    kv("观察 hook 条目", h.mail_present ? "已存在" : "未安装（mail setup）",
+       h.mail_present ? "oktxt" : "warntxt");
+    kv("hooks.enabled", h.hooks_enabled === true ? "true"
+        : (h.hooks_enabled === null ? "未设置（hook 不会执行）" : String(h.hooks_enabled)),
+       h.hooks_enabled === true ? "oktxt" : "warntxt");
+    kv("说明", h.note || "", "dimtxt");
+  }
+  const t = s.task || {};
+  if (t.source === "error") {
+    kv("计划任务", "查询失败：" + t.detail, "err");
+  } else if (t.installed) {
+    kv("计划任务", t.task + "（" + (t.state || "?") + "）", "oktxt");
+    kv("上次运行", t.last_run_time ? fmtWhen(t.last_run_time) : "—");
+    let meaning = {0: "成功", 267009: "运行中", 267011: "尚未运行"}[t.last_task_result];
+    kv("LastTaskResult", String(t.last_task_result ?? "—") +
+       (meaning ? "（" + meaning + "）" : "（原始码）"));
+  } else {
+    kv("计划任务", "未安装（install-mail-task.ps1）", "warntxt");
+  }
+  kv("任务说明", "任务已安装/最近运行≠自然触发已验收；安装成功≠真实发信。", "dimtxt");
+  const pw = s.password || {};
+  kv("SMTP 密码", pw.present ? "环境变量已设置（值不显示）"
+      : "未设置（" + (pw.env || "HQ_SMTP_PASSWORD") + "，按 README 设置）",
+     pw.present ? "oktxt" : "warntxt");
+  const mc = s.mail_config || {};
+  const mcState = mc.state || "invalid";
+  let mcText;
+  if (mc.complete) mcText = "完整（可启用）";
+  else if (mcState === "ok") mcText = "不完整（有校验问题；见配置面板）";
+  else if (mcState === "schema_error")
+    mcText = "结构有问题（schema_error；见配置面板）";
+  else if (mcState === "missing") mcText = "缺失（先在配置面板创建草稿）";
+  else mcText = "不可读（" + mcState + "；见配置面板）";
+  kv("邮件配置", mcText, mc.complete ? "oktxt" : "warntxt");
+  if (mc.detail) kv("配置状态详情", String(mc.detail), "dimtxt");
+  kv("最近观察记录", s.last_observed ? fmtWhen(s.last_observed) : "尚无记录");
+  if (s.last_observed === null && s.db_source) kv("库状态", s.db_source, "dimtxt");
+}
+
+function buildDetailRow(r) {
+  // 详情行同步构建（邮件正文异步填充）；展开键=稳定 session/turn，
+  // 供跨轮询重渲染后恢复（复审 F4）。
+  const dtr = document.createElement("tr");
+  dtr.className = "detail";
+  const td = el("td", "", "");
+  td.colSpan = 5;
+  const kv = (k, v) => {
+    const line = el("div", "");
+    line.appendChild(el("b", "", k + "："));
+    line.appendChild(document.createTextNode(String(v ?? "—")));
+    td.appendChild(line);
+  };
+  kv("项目路径", r.project);
+  kv("session / turn", r.session + " / " + r.turn);
+  kv("观察时间（北京）", fmtWhen(r.observed));
+  kv("完成时间（北京，宿主终态）", fmtWhen(r.confirmed));
+  if (r.deadline_beijing) kv("发送截止（北京）", r.deadline_beijing);
+  else if (r.deadline_raw) {
+    // 复审 R2：截止值存在但无法解析——原值如实展示，不装成正常待处理
+    const e = el("div", "err", "发送截止原文无法解析：" + r.deadline_raw);
+    td.appendChild(e);
+  }
+  if (r.sent) kv("SMTP 接受时间（北京）", fmtWhen(r.sent));
+  if (r.notified) kv("通知标记", "notified=1（tick 已处理该轮）");
+  if (r.data_error) { const e = el("div", "err", "数据问题：" + r.data_error); td.appendChild(e); }
+  if (r.error) { const e = el("div", "err", "错误：" + r.error); td.appendChild(e); }
+  const fs = el("div", "fullsum", r.summary || "（无摘要）");
+  const fl = el("div", "");
+  fl.appendChild(el("b", "", "摘要（完整）："));
+  fl.appendChild(fs);
+  td.appendChild(fl);
+  if (r.delivery_key) {
+    // 边界方案 B2：先建 loading 节点再发请求——该节点就是结果所有者；详情
+    // 被关闭（整行移除）或被重渲染替换后节点不再连接，迟到响应一律丢弃：
+    // 不复活已关闭详情，也不把旧结果转写到新节点。
+    const holder = el("div", "", "邮件正文加载中…");
+    td.appendChild(holder);
+    api("/api/delivery?key=" + encodeURIComponent(r.delivery_key))
+      .then(d => {
+        if (!holder.isConnected) return;
+        holder.remove();
+        if (d.__status === 200) {
+          td.appendChild(el("div", "", "主题：" + d.subject));
+          td.appendChild(el("pre", "body", d.body));
+        } else if (d.__status === 404) {
+          td.appendChild(el("div", "err", "邮件记录不存在（可能已被清理）"));
+        } else {
+          // 复审 R4：非 200 不渲染正文，结构化说明；区分服务在线与业务库不可读
+          const det = d.error && d.error.detail ? "：" + d.error.detail : "";
+          td.appendChild(el("div", "err", d.__status === 503
+            ? "邮件正文读取失败：业务库暂不可读" + det + "。服务本身在运行。"
+            : "邮件正文读取失败（HTTP " + d.__status + det + "）。"));
+        }
+      })
+      .catch(() => {
+        if (holder.isConnected) holder.textContent = "邮件正文加载失败";
+      });
+  } else {
+    td.appendChild(el("div", "dimtxt",
+      "没有对应邮件记录（完成在夜间窗口且已过截止→待核对；白天完成→仅日报）。"));
+  }
+  dtr.appendChild(td);
+  return dtr;
+}
+
+async function toggleDetail(tr, r) {
+  const key = rowKey(r);
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("detail")) {
+    next.remove();
+    state.expanded.delete(key);
+    return;
+  }
+  tr.after(buildDetailRow(r));
+  state.expanded.add(key);
+}
+
+function showDelivery(box, key) {
+  const old = box.nextElementSibling;
+  if (old && old.classList.contains("detailbox")) { old.remove(); return; }
+  // 边界方案 B2：先插入 loading 节点再发请求，该节点就是结果所有者；用户
+  // 关闭即移除、使在途响应失效。回调只更新仍连接且仍是本盒详情的原节点，
+  // 绝不在 await 后无条件 box.after（防已关闭详情被迟到响应复活），也不把
+  // 旧结果转写到重开后新建的节点上。
+  const pre = el("pre", "body detailbox", "加载中…");
+  box.after(pre);
+  api("/api/delivery?key=" + encodeURIComponent(key))
+    .then(d => {
+      if (!pre.isConnected || box.nextElementSibling !== pre) return;
+      if (d.__status === 200) {
+        pre.textContent = d.subject + "\n\n" + d.body;
+      } else if (d.__status === 404) {
+        pre.textContent = "记录不存在";
+      } else {
+        // 复审 R4：非 200 显示结构化错误，不渲染 undefined 假正文
+        const det = d.error && d.error.detail ? "：" + d.error.detail : "";
+        pre.textContent = d.__status === 503
+          ? "日报正文读取失败：业务库暂不可读" + det + "。服务本身在运行。"
+          : "日报正文读取失败（HTTP " + d.__status + det + "）。";
+        pre.className = "body detailbox err";
+      }
+    })
+    .catch(() => {
+      if (!pre.isConnected || box.nextElementSibling !== pre) return;
+      pre.textContent = "加载失败"; pre.className = "body detailbox err";
+    });
+}
+
+// ---------------- 配置面板 ----------------
+
+$("btnconfig").addEventListener("click", async () => {
+  const c = $("config");
+  const opening = c.classList.contains("hidden");
+  if (opening) {
+    // 配置替换主记录区（F8）：主表隐藏（DOM 保留，关闭即恢复筛选/展开/滚动），
+    // 日报/接入侧区保持可见
+    $("main").classList.add("hidden");
+    c.classList.remove("hidden");
+    document.querySelector("main").classList.add("config-open");
+    await loadConfigPanel();
+  } else {
+    state.v.config++;                 // 关闭使在途配置加载失效（B2）
+    c.classList.add("hidden");
+    $("main").classList.remove("hidden");
+    document.querySelector("main").classList.remove("config-open");
+  }
+});
+
+// 首建草稿（source=missing）：仅允许暂停草稿，revision 固定 "missing"
+function creationDraft(cfg) {
+  return { target: cfg.target, exists: false, revision: "missing",
+           mail: {}, projects: [], password_present: cfg.password_present ?? null,
+           validation: null };
+}
+
+async function loadConfigPanel() {
+  const c = $("config");
+  const my = ++state.v.config;          // 本次打开/重载的版本（B2）
+  // 过期 = 已有更新的加载，或面板已被关闭。成功与失败写 DOM 前同一判断。
+  const expired = () => my !== state.v.config || c.classList.contains("hidden");
+  const head = el("h3", "", "配置（保存到 " + "…" + "）");
+  c.replaceChildren(head);
+  let cfg;
+  try { cfg = await api("/api/config"); }
+  catch (e) {
+    if (expired()) return;              // 旧版本的失败不得追加到新面板（B2）
+    c.appendChild(el("div", "err", "配置读取失败：" + e.message));
+    return;
+  }
+  if (expired()) return;
+  // 生命周期（复审 F1）：missing → 首建暂停草稿（revision="missing"）；
+  // parse_error/io_error/schema_error → 错误持续可见，不给可保存的空替代
+  // 表单（旧 'error'+exists=false 形状按 missing 处理，兼容旧响应）。
+  const legacyMissing = cfg.source === "error" && cfg.exists === false;
+  if (cfg.source === "missing" || legacyMissing) {
+    c.appendChild(el("div", "notice",
+      "配置文件不存在。填写后保存将创建一份暂停草稿（不会启用自动邮件）。"));
+    state.cfg = creationDraft(cfg);
+    c.appendChild(buildForm(state.cfg, true));
+    return;
+  }
+  if (cfg.source === "parse_error" || cfg.source === "io_error"
+      || (cfg.source === "error" && cfg.exists !== false)) {
+    c.appendChild(el("div", "err", "配置" +
+      (cfg.source === "parse_error" ? "不是合法 TOML" : "无法读取") +
+      "：" + (cfg.detail || "")));
+    c.appendChild(el("div", "notice",
+      "为保护原文件（可能含未登记内容），面板不提供重建表单；请人工修复 " +
+      cfg.target + " 后重试。此错误不会自动消失。"));
+    state.cfg = null;
+    return;
+  }
+  if (cfg.source === "schema_error") {
+    c.appendChild(el("div", "err", "配置结构有问题：" + (cfg.detail || "")));
+    c.appendChild(el("div", "notice",
+      "结构损坏的组件不可编辑（防止覆盖未知内容）；请人工修复 " + cfg.target +
+      "。此错误不会自动消失。"));
+    state.cfg = null;
+    return;
+  }
+  state.cfg = cfg;
+  state.projects = (cfg.projects || []).map(p => ({
+    normalized: p.normalized, display: p.path, exists: p.exists }));
+  c.appendChild(buildForm(cfg, false));
+}
+
+function buildForm(cfg, firstCreate) {
+  const wrap = el("div", "frm");
+  const exists = cfg.exists;
+  wrap.appendChild(el("div", "", "目标：" + cfg.target +
+    (exists ? "" : "（文件不存在，保存后创建）")));
+  wrap.appendChild(el("div", "notice",
+    "保存会先备份原文件（HQ_HOME/.local/backups/dashboard-config/），未知配置项原样保留；格式/注释以重新编码为准。时间窗与 19:00 日报时刻不可修改。"));
+
+  const h = el("h3", "", "登记项目");
+  wrap.appendChild(h);
+  const projBox = el("div", "", "");
+  const addRow = (val, existsFlag) => {
+    const row = el("div", "proj");
+    const inp = el("input"); inp.type = "text"; inp.value = val || "";
+    inp.placeholder = "项目绝对路径，如 C:/code/demo";
+    row.appendChild(inp);
+    const st = el("span", "exists " + (existsFlag ? "oktxt" : "dimtxt"),
+                  existsFlag === undefined ? "" : (existsFlag ? "目录存在" : "目录不存在"));
+    row.appendChild(st);
+    // 边界方案 B2：目录存在性查询每个输入行独立版本，并捕获当时的输入值；
+    // 只有行仍连接、版本仍最新且当前值未变才回显，失败同界。不与顶部邮件
+    // 切换等其他查询共用取消权。
+    let lookup = 0;
+    inp.addEventListener("change", async () => {
+      const my = ++lookup;
+      const value = inp.value;
+      st.textContent = "…";
+      try {
+        const cfg2 = await api("/api/config");            // 只为目录存在性回显
+        if (my !== lookup || inp.value !== value || !row.isConnected) return;
+        const hit = (cfg2.projects || []).find(p => p.path === inp.value);
+        st.textContent = hit ? (hit.exists ? "目录存在" : "目录不存在") : "";
+        st.className = "exists " + (hit && hit.exists ? "oktxt" : "warntxt");
+      } catch (e) {
+        if (my !== lookup || inp.value !== value) return;
+        st.textContent = "";
+      }
+    });
+    const del = el("button", "danger", "删除登记");
+    del.addEventListener("click", () => row.remove());
+    row.appendChild(del);
+    projBox.appendChild(row);
+  };
+  for (const p of cfg.projects || []) addRow(p.path, p.exists);
+  wrap.appendChild(projBox);
+  const add = el("button", "", "+ 添加项目");
+  add.addEventListener("click", () => addRow(""));
+  wrap.appendChild(add);
+  wrap.appendChild(el("div", "notice",
+    "只改登记：不创建/删除项目文件，历史记录保留。"));
+
+  wrap.appendChild(el("h3", "", "SMTP / 自动邮件"));
+  const m = cfg.mail || {};
+  const mkInput = (label, id, val, type) => {
+    const l = el("label", "", label);
+    const i = el("input"); i.type = type || "text"; i.id = id; i.value = val ?? "";
+    wrap.appendChild(l); wrap.appendChild(i);
+    return i;
+  };
+  const en = el("label");
+  const enCb = el("input"); enCb.type = "checkbox"; enCb.id = "cfg-enabled";
+  enCb.checked = !!(m && m.enabled);
+  if (firstCreate) {
+    // 首建只允许暂停草稿（复审 F1）：不提供启用开关
+    enCb.checked = false;
+    enCb.disabled = true;
+  }
+  en.appendChild(enCb);
+  en.appendChild(document.createTextNode(firstCreate
+    ? " 启用自动邮件（首建草稿固定暂停；保存后如需启用，请重新打开配置面板勾选）"
+    : " 启用自动邮件（暂停＝停止确认与发信；观察 hook 仍登记候选；恢复后按原有截止规则继续，不补发旧邮件）"));
+  wrap.appendChild(en);
+  const host = mkInput("SMTP 服务器", "cfg-host", m.smtp_host);
+  const rowp = el("div", "row2");
+  const portL = el("label", "", "端口（空=按安全方式取默认）");
+  const port = el("input"); port.type = "number"; port.id = "cfg-port";
+  port.value = m.smtp_port ?? "";
+  portL.appendChild(port);
+  const secL = el("label", "", "安全方式");
+  const sec = el("select"); sec.id = "cfg-sec";
+  for (const [v, t] of [["", "（未设置）"], ["ssl", "ssl"], ["starttls", "starttls"]]) {
+    const o = el("option", "", t); o.value = v; if ((m.security || "") === v) o.selected = true;
+    sec.appendChild(o);
+  }
+  secL.appendChild(sec);
+  rowp.appendChild(portL); rowp.appendChild(secL);
+  wrap.appendChild(rowp);
+  const user = mkInput("用户名", "cfg-user", m.username);
+  const penv = mkInput("密码环境变量名", "cfg-penv", m.password_env || "HQ_SMTP_PASSWORD");
+  const from = mkInput("发件地址", "cfg-from", m.from_addr);
+  const to = mkInput("收件地址", "cfg-to", m.to_addr);
+  const pw = el("div", "", "");
+  const showPw = () => {
+    const env = penv.value.trim() || "HQ_SMTP_PASSWORD";
+    const present = cfg.password_present && (m.password_env || "HQ_SMTP_PASSWORD") === env;
+    pw.textContent = "密码环境变量 " + env + "：" +
+      (present ? "已设置（当前进程已取到，值不显示）" : "未设置——按 README 用 setx 设置后重启相关进程");
+    pw.className = present ? "oktxt" : "warntxt";
+  };
+  penv.addEventListener("change", showPw); showPw();
+  wrap.appendChild(pw);
+
+  const validation = el("div", "", "");
+  const showVal = () => {
+    if (!cfg.validation) return;
+    const probs = cfg.validation.enable_problems || [];
+    const draft = cfg.validation.draft_problems || [];
+    validation.textContent = probs.length
+      ? "启用校验问题：" + probs.join("；") : "启用校验：通过（保存后计划任务可能自动发送）";
+    validation.className = probs.length ? "warntxt" : "oktxt";
+    if (draft.length) {
+      validation.textContent += " ｜ 当前草稿问题：" + draft.join("；");
+    }
+  };
+  showVal();
+  wrap.appendChild(validation);
+
+  const save = el("button", "", "保存配置");
+  const testBtn = el("button", "", "发送测试邮件");
+  const msg = el("div", "", "");
+  msg.id = "testresult";
+  const target = (m && m.to_addr) ? m.to_addr : "（保存后显示收件地址）";
+  testBtn.title = "向已保存配置的收件地址发送一封 TEST：" + target;
+  wrap.appendChild(el("div", "notice", "测试邮件目标：" + target +
+    "。保存 ≠ 发送；测试邮件须点此按钮，只发一封，不运行 tick、不发历史待发。"));
+
+  save.addEventListener("click", async () => {
+    save.disabled = true; msg.textContent = "保存中…"; msg.className = "";
+    const mailPatch = {};
+    if (enCb.checked !== !!(m && m.enabled)) mailPatch.enabled = enCb.checked;
+    const pairs = [["smtp_host", host], ["smtp_port", port], ["security", sec],
+                   ["username", user], ["password_env", penv],
+                   ["from_addr", from], ["to_addr", to]];
+    for (const [k, i] of pairs) {
+      const v = i.value.trim();
+      const orig = (m && m[k]) ?? "";
+      if (String(orig) !== v && !(k === "smtp_port" && v === "" && orig == null)) {
+        if (k === "smtp_port") mailPatch.smtp_port = v === "" ? null : parseInt(v, 10);
+        else if (k === "security") mailPatch.security = v === "" ? null : v;
+        else mailPatch[k] = v;
+      }
+    }
+    const patch = {};
+    const paths = [...projBox.querySelectorAll(".proj input")].map(i => i.value.trim());
+    patch.projects = paths.filter(p => p).map(p => ({ path: p }));
+    if (Object.keys(mailPatch).length) patch.mail = mailPatch;
+    try {
+      const r = await api("/api/config", { method: "POST",
+        headers: { "Content-Type": "application/json", "X-HQ-CSRF": CSRF },
+        body: JSON.stringify({ revision: cfg.revision, patch }) });
+      if (r.__status === 200) {
+        msg.textContent = "已保存" + (r.backup ? "（原文件备份：" + r.backup + "）" : "（新建，无备份）") +
+          "；修改由下一次调度读取生效。";
+        msg.className = "oktxt";
+        await loadConfigPanel();
+        await refresh();
+      } else {
+        msg.textContent = "保存失败：" + (r.error ? r.error.detail : "HTTP " + r.__status);
+        msg.className = "err";
+        if (r.error && r.error.kind === "conflict") {
+          msg.textContent += "（请关闭后重新打开配置面板以重新加载）";
+        }
+      }
+    } catch (e) {
+      msg.textContent = "保存请求失败：" + e.message; msg.className = "err";
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  testBtn.addEventListener("click", async () => {
+    testBtn.disabled = true; msg.textContent = "测试邮件发送中…"; msg.className = "";
+    try {
+      const r = await api("/api/test-mail", { method: "POST",
+        headers: { "Content-Type": "application/json", "X-HQ-CSRF": CSRF },
+        body: JSON.stringify({ request_id: crypto.randomUUID() }) });
+      if (r.__status === 200) {
+        const mark = { accepted: ["已发送：SMTP 已接受（不代表收件箱到达）", "oktxt"],
+                       rejected: ["发送失败：" + (r.detail || ""), "err"],
+                       unknown: ["结果待核对（不自动重发）：" + (r.detail || ""), "warntxt"],
+                       running: ["发送中…", ""] }[r.status] || [r.status, ""];
+        msg.textContent = mark[0] + (r.duplicate ? "（重复请求，返回原状态）" : "");
+        msg.className = mark[1];
+      } else {
+        msg.textContent = "测试请求未执行：" + (r.error ? r.error.detail : "HTTP " + r.__status);
+        msg.className = "err";
+      }
+    } catch (e) {
+      msg.textContent = "测试请求失败（不自动重试）：" + e.message; msg.className = "err";
+    } finally {
+      testBtn.disabled = false;
+    }
+  });
+
+  wrap.appendChild(el("div", "", ""));
+  const btnrow = el("div", "row2");
+  btnrow.appendChild(save);
+  btnrow.appendChild(testBtn);
+  wrap.appendChild(btnrow);
+  wrap.appendChild(msg);
+  return wrap;
+}
+
+// ---------------- 头部开关 / 侧栏 ----------------
+
+$("mailtog").addEventListener("click", async () => {
+  const tog = $("mailtog");
+  if (tog.textContent.startsWith("配置不可读")
+      || tog.textContent.startsWith("配置错误")) return;
+  if (tog.dataset.busy) return;               // 操作期间禁重复点击（F8）
+  tog.dataset.busy = "1"; tog.style.opacity = "0.5";
+  try {
+    const cfg = await api("/api/config");
+    if (cfg.source !== "ok") {
+      alert("配置" + (cfg.source === "missing" ? "不存在（先在“配置”面板创建草稿）"
+            : cfg.source === "schema_error"
+            ? "结构有问题（" + (cfg.detail || "") + "）；结构/类型损坏时不可经开关切换，请人工修复"
+            : "不可读（" + (cfg.source || "error") + "：" + (cfg.detail || "") + "）"));
+      return;
+    }
+    const patch = { mail: { enabled: !cfg.mail.enabled } };
+    const r = await api("/api/config", { method: "POST",
+      headers: { "Content-Type": "application/json", "X-HQ-CSRF": CSRF },
+      body: JSON.stringify({ revision: cfg.revision, patch }) });
+    if (r.__status === 200) { await refresh(); }
+    else if (r.__status === 409) {
+      // 409 分两种：服务忙 ≠ 配置被外部修改（F8 分别说明）
+      if (r.error && r.error.kind === "busy") {
+        alert("另一个保存/测试操作正在执行，本次未执行，请稍后重试。");
+      } else {
+        alert("配置已被外部修改（revision 不一致），未覆盖。请重新打开“配置”面板加载最新内容后重试。");
+      }
+    } else {
+      alert("未保存：" + (r.error ? r.error.detail : "HTTP " + r.__status) +
+        "（启用需完整 SMTP 配置与密码环境变量；可在“配置”面板填写）");
+    }
+  } catch (e) { alert("请求失败：" + e.message); }
+  finally { delete tog.dataset.busy; tog.style.opacity = ""; }
+});
+
+$("btnchecksetup").addEventListener("click", async () => {
+  const b = $("btnchecksetup"); b.disabled = true;
+  try {
+    const r = await api("/api/check-setup", { method: "POST",
+      headers: { "Content-Type": "application/json", "X-HQ-CSRF": CSRF },
+      body: JSON.stringify({}) });
+    if (r.__status === 200) renderSetup(r.setup, r.queried_at);
+    else if (r.__status === 409) alert("另一个写操作正在执行，请稍后重试");
+    else alert("查询失败：" + (r.error ? r.error.detail : ""));
+  } catch (e) { alert("请求失败：" + e.message); }
+  finally { b.disabled = false; }
+});
+
+// ---------------- 筛选 / 分页 / 轮询 ----------------
+
+$("btnrefresh").addEventListener("click", () => refresh());
+$("fproject").addEventListener("change", () => {
+  state.projectFilter = $("fproject").value || null;
+  state.offset = 0; refresh();
+});
+$("fperiod").addEventListener("change", () => { state.offset = 0; refresh(); });
+$("fattention").addEventListener("change", () => {
+  // 需注意跨全部历史（后端同样口径）：勾选自动把时间范围切到“全部”；
+  // 日报也按异常判据过滤，两个分页偏移都归零（复审 R2）
+  if ($("fattention").checked) $("fperiod").value = "all";
+  state.offset = 0; state.dailyOffset = 0; refresh();
+});
+$("pprev").addEventListener("click", () => {
+  state.offset = Math.max(0, state.offset - state.limit); refresh();
+});
+$("pnext").addEventListener("click", () => { state.offset += state.limit; refresh(); });
+$("dprev").addEventListener("click", () => {
+  state.dailyOffset = Math.max(0, state.dailyOffset - state.dailyLimit); refresh();
+});
+$("dnext").addEventListener("click", () => {
+  state.dailyOffset += state.dailyLimit; refresh();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refresh();            // 隐藏页面暂停轮询，回来自动刷一次
+});
+setInterval(() => { if (!document.hidden) refresh(); }, 10000);
+// 轮询重渲染不会覆盖配置表单：表单在 #config 内独立于签名渲染；数据未变时
+// 主表也不重建（签名跳过）。展开详情/滚动位置跨真实数据更新保持（F4）。
+
+refresh();
+</script>
+</body>
+</html>

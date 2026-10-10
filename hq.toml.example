@@ -1,9 +1,24 @@
-# hq 配置：登记你要看盘的项目（绝对路径）。
+# hq 配置：登记要看日报的项目（绝对路径）。
 # 复制为仓库根目录的 hq.toml —— 它是你的个人实例数据，已被 .gitignore 排除。
-wip_limit = 3   # 同时 active 的主线上限，超过会在简报里提醒
+
+# Windows 路径用引号包裹即可；也可手写正斜杠：
+#   path = "C:\\code\\demo-api"  或  path = "C:/code/demo-api"
 
 [[projects]]
 path = "/absolute/path/to/your/project-a"
 
 [[projects]]
 path = "/absolute/path/to/your/project-b"
+
+# —— 本轮结束邮件与 19:00 日报（可选，默认关闭）——
+# 一次性配置步骤见 README「本轮结束邮件与 19:00 日报」。
+# 密码只放环境变量（password_env 指定变量名），绝不写进本文件。
+[mail]
+enabled = false
+smtp_host = "smtp.example.com"     # 你的 SMTP 服务商地址
+smtp_port = 465                    # 留空按 security 取默认（ssl=465，starttls=587）
+security = "ssl"                   # ssl | starttls（强制证书校验，不降级）
+username = "you@example.com"
+password_env = "HQ_SMTP_PASSWORD"  # 发送前设置该环境变量（Windows: setx）
+from_addr = "you@example.com"
+to_addr = "you@example.com"        # 首版只支持一个收件地址
